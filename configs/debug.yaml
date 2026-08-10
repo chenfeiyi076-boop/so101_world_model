@@ -1,0 +1,24 @@
+model:
+  in_channels: 16
+  hidden_size: 64
+  depth: 2
+  num_heads: 2
+  patch_size: 2
+  mlp_ratio: 4.0
+  use_qk_norm: true
+
+data:
+  n_frames: 4
+  num_history: 2
+  frame_skip: 1
+  action_dim: 6
+
+  # CPU debug 专用
+  latent_channels: 16
+  latent_height: 8
+  latent_width: 8
+
+training:
+  batch_size: 1
+  lr: 0.0001
+  seed: 0
