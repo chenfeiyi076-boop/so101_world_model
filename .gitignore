@@ -34,7 +34,7 @@ desktop.ini
 # =========================
 # Project data
 # =========================
-data/
+/data/
 
 # =========================
 # Training outputs
