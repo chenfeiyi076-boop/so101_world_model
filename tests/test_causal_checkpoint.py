@@ -15,7 +15,10 @@ from src.causal.data.common import ActionStats
 from src.causal.runtime import build_model
 
 
-def config(stride=4, representation="fast_chunk"):
+def config(stride=4, representation="fast_chunk", precision=None):
+    train = {"batch_size": 1, "steps": 1, "lr": 1e-4}
+    if precision is not None:
+        train["precision"] = precision
     return resolve_config(
         {
             "experiment": {"name": "checkpoint_test", "seed": 0},
@@ -47,7 +50,7 @@ def config(stride=4, representation="fast_chunk"):
                 "use_qk_norm": True,
             },
             "flow_matching": {"future_only_loss": True},
-            "train": {"batch_size": 1, "steps": 1, "lr": 1e-4},
+            "train": train,
             "checkpoint": {"output_dir": "unused"},
             "latent": {"convention": "posterior_sample_times_scaling_no_shift"},
         }
@@ -76,6 +79,7 @@ def test_checkpoint_round_trip_preserves_resolved_config_and_stats(tmp_path):
     assert loaded["config"]["temporal"]["frame_stride"] == 4
     assert loaded["config"]["action"]["raw_action_dim"] == 6
     assert loaded["config"]["action"]["effective_action_dim"] == 24
+    assert loaded["config"]["train"]["precision"] == "fp32"
     assert loaded["config"]["action"]["action_mean"] == stats.mean.tolist()
     assert loaded["config"]["action"]["action_std"] == stats.std.tolist()
     assert torch.equal(loaded["action_stats"]["mean"], stats.mean)
@@ -94,3 +98,9 @@ def test_representation_mismatch_raises():
     requested = config(stride=4, representation="shifted_sampled")
     with pytest.raises(ValueError, match="representation"):
         validate_config_compatibility(checkpoint_config, requested)
+
+
+def test_precision_only_difference_is_not_a_compatibility_mismatch():
+    checkpoint_config = config(precision="bf16")
+    requested = config(precision="fp32")
+    validate_config_compatibility(checkpoint_config, requested)

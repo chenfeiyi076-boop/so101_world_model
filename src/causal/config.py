@@ -108,6 +108,10 @@ def resolve_config(config: dict) -> dict:
     train["val_every"] = int(train.get("val_every", 250))
     train["val_windows"] = int(train.get("val_windows", 128))
     train["num_workers"] = int(train.get("num_workers", 0))
+    precision = str(train.get("precision", "fp32"))
+    if precision not in {"fp32", "bf16"}:
+        raise ValueError("train.precision must be 'fp32' or 'bf16'")
+    train["precision"] = precision
     value["experiment"]["seed"] = int(value["experiment"].get("seed", 42))
 
     if value["flow_matching"].get("future_only_loss", True) is not True:

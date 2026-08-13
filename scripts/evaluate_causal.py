@@ -15,7 +15,17 @@ if str(ROOT) not in sys.path:
 from src.causal.checkpointing import load_checkpoint, validate_requested_config
 from src.causal.config import load_and_resolve_config
 from src.causal.datasets import build_evaluation_dataset
-from src.causal.runtime import build_model, evaluate_flow_loss
+from src.causal.runtime import (
+    build_model,
+    evaluate_flow_loss,
+    validate_precision_device,
+)
+
+
+def evaluation_precision(config: dict) -> str:
+    """Treat historical causal checkpoints without precision as FP32."""
+
+    return config["train"].get("precision", "fp32")
 
 
 def main() -> None:
@@ -35,6 +45,12 @@ def main() -> None:
             checkpoint, load_and_resolve_config(args.config)
         )
     config = checkpoint["config"]  # checkpoint is the source of truth
+    device = torch.device(args.device)
+    if device.type == "cuda" and not torch.cuda.is_available():
+        raise RuntimeError("CUDA was requested but is not available")
+    precision = evaluation_precision(config)
+    validate_precision_device(precision, device)
+
     dataset = build_evaluation_dataset(checkpoint, split=args.split)
     if args.max_windows > 0 and args.max_windows < len(dataset):
         positions = (
@@ -47,9 +63,6 @@ def main() -> None:
         dataset = Subset(dataset, positions)
     loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=False)
 
-    device = torch.device(args.device)
-    if device.type == "cuda" and not torch.cuda.is_available():
-        raise RuntimeError("CUDA was requested but is not available")
     model = build_model(config).to(device)
     model.load_state_dict(checkpoint["model_state_dict"])
     values = []
@@ -61,6 +74,7 @@ def main() -> None:
                 device=device,
                 num_history=config["temporal"]["num_history"],
                 seed=20260 + draw,
+                precision=precision,
             )
         )
     print("checkpoint:", args.checkpoint)
@@ -68,6 +82,7 @@ def main() -> None:
     print("frame_stride:", config["temporal"]["frame_stride"])
     print("representation:", config["action"]["representation"])
     print("effective_action_dim:", config["action"]["effective_action_dim"])
+    print("precision:", precision)
     print("action_mean (checkpoint):", checkpoint["action_stats"]["mean"])
     print("action_std (checkpoint):", checkpoint["action_stats"]["std"])
     print("mean FM loss:", sum(values) / len(values))

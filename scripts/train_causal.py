@@ -15,7 +15,12 @@ if str(ROOT) not in sys.path:
 from src.causal.checkpointing import make_checkpoint, save_checkpoint
 from src.causal.config import load_and_resolve_config
 from src.causal.datasets import build_training_datasets, data_info
-from src.causal.runtime import build_model, causal_flow_loss, evaluate_flow_loss
+from src.causal.runtime import (
+    build_model,
+    causal_flow_loss,
+    evaluate_flow_loss,
+    validate_precision_device,
+)
 
 
 def fixed_subset(dataset, maximum: int):
@@ -41,6 +46,8 @@ def main() -> None:
     device = torch.device(args.device)
     if device.type == "cuda" and not torch.cuda.is_available():
         raise RuntimeError("CUDA was requested but is not available")
+    precision = config["train"]["precision"]
+    validate_precision_device(precision, device)
 
     seed = config["experiment"]["seed"]
     torch.manual_seed(seed)
@@ -84,6 +91,7 @@ def main() -> None:
     print("representation:", config["action"]["representation"])
     print("frame_stride:", config["temporal"]["frame_stride"])
     print("effective_action_dim:", config["action"]["effective_action_dim"])
+    print("precision:", precision)
     print("action_stats source:", action_stats.source)
     print("action_mean:", action_stats.mean)
     print("action_std:", action_stats.std)
@@ -96,7 +104,11 @@ def main() -> None:
         for batch in train_loader:
             optimizer.zero_grad(set_to_none=True)
             loss = causal_flow_loss(
-                model, batch, device=device, num_history=num_history
+                model,
+                batch,
+                device=device,
+                num_history=num_history,
+                precision=precision,
             )
             if not torch.isfinite(loss):
                 raise RuntimeError(f"non-finite loss at step {step + 1}")
@@ -108,8 +120,8 @@ def main() -> None:
             step += 1
             if step == 1 or step % 25 == 0:
                 print(
-                    f"step={step:05d} train={float(loss):.6f} "
-                    f"grad={float(grad_norm):.4f}"
+                    f"step={step:05d} train={loss.detach().item():.6f} "
+                    f"grad={grad_norm.detach().item():.4f}"
                 )
 
             if step % train["val_every"] == 0 or step == train["steps"]:
@@ -119,6 +131,7 @@ def main() -> None:
                     device=device,
                     num_history=num_history,
                     seed=seed + 10000,
+                    precision=precision,
                 )
                 print(f"step={step:05d} val={val_loss:.6f}")
                 if val_loss < best_val_loss:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
+from contextlib import nullcontext
 
 import torch
 
@@ -10,6 +11,27 @@ from src.diffusion.flow_matching import (
 )
 
 from .model import CausalDiT
+
+
+SUPPORTED_PRECISIONS = {"fp32", "bf16"}
+
+
+def validate_precision_device(precision: str, device: torch.device) -> None:
+    if precision not in SUPPORTED_PRECISIONS:
+        raise ValueError(
+            f"precision must be one of {sorted(SUPPORTED_PRECISIONS)}, got {precision!r}"
+        )
+    if precision == "bf16" and device.type != "cuda":
+        raise RuntimeError("bf16 causal training/evaluation requires a CUDA device")
+
+
+def precision_context(device: torch.device, precision: str):
+    """Return the shared train/evaluation forward precision context."""
+
+    validate_precision_device(precision, device)
+    if precision == "fp32":
+        return nullcontext()
+    return torch.autocast(device_type="cuda", dtype=torch.bfloat16)
 
 
 def build_model(config: dict) -> CausalDiT:
@@ -32,28 +54,30 @@ def causal_flow_loss(
     *,
     device: torch.device,
     num_history: int,
+    precision: str = "fp32",
 ) -> torch.Tensor:
     latents = batch["latents"].to(device=device, dtype=torch.float32)
     action_cond = batch["action_cond"].to(device=device, dtype=torch.float32)
     action_valid_mask = batch["action_valid_mask"].to(
         device=device, dtype=torch.bool
     )
-    fm = prepare_flow_matching_batch(
-        latents=latents,
-        num_history=num_history,
-        history_noise_std=0.0,
-    )
-    prediction = model(
-        fm.noisy_latents,
-        fm.tau,
-        action_cond,
-        action_valid_mask,
-    )
-    return flow_matching_loss(
-        prediction=prediction,
-        target_velocity=fm.target_velocity,
-        loss_mask=fm.loss_mask,
-    )
+    with precision_context(device, precision):
+        fm = prepare_flow_matching_batch(
+            latents=latents,
+            num_history=num_history,
+            history_noise_std=0.0,
+        )
+        prediction = model(
+            fm.noisy_latents,
+            fm.tau,
+            action_cond,
+            action_valid_mask,
+        )
+        return flow_matching_loss(
+            prediction=prediction,
+            target_velocity=fm.target_velocity,
+            loss_mask=fm.loss_mask,
+        )
 
 
 @torch.inference_mode()
@@ -64,7 +88,9 @@ def evaluate_flow_loss(
     device: torch.device,
     num_history: int,
     seed: int,
+    precision: str = "fp32",
 ) -> float:
+    validate_precision_device(precision, device)
     was_training = model.training
     model.eval()
     total = 0.0
@@ -80,9 +106,10 @@ def evaluate_flow_loss(
                 batch,
                 device=device,
                 num_history=num_history,
+                precision=precision,
             )
             batch_size = int(batch["latents"].shape[0])
-            total += float(loss) * batch_size
+            total += loss.detach().item() * batch_size
             samples += batch_size
     if was_training:
         model.train()
