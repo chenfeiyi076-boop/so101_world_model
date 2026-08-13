@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+import time
 from pathlib import Path
 
 import torch
@@ -113,6 +114,7 @@ def main() -> None:
     print("action_std:", action_stats.std)
     print("train/val windows:", len(train_dataset), len(val_dataset))
 
+    wall_clock_started_at = time.perf_counter()
     model.train()
     step = 0
     best_val_loss = float("inf")
@@ -139,9 +141,13 @@ def main() -> None:
             scheduler.step()
             step += 1
             if step == 1 or step % 25 == 0:
+                loss_value = loss.detach().item()
+                grad_norm_value = grad_norm.detach().item()
+                elapsed_wall_seconds = time.perf_counter() - wall_clock_started_at
                 print(
-                    f"step={step:05d} train={loss.detach().item():.6f} "
-                    f"grad={grad_norm.detach().item():.4f} lr={update_lr:.8e}"
+                    f"step={step:05d} train={loss_value:.6f} "
+                    f"grad={grad_norm_value:.4f} lr={update_lr:.8e} "
+                    f"elapsed_wall_seconds={elapsed_wall_seconds:.3f}"
                 )
 
             if step % train["val_every"] == 0 or step == train["steps"]:
@@ -153,7 +159,11 @@ def main() -> None:
                     seed=seed + 10000,
                     precision=precision,
                 )
-                print(f"step={step:05d} val={val_loss:.6f}")
+                elapsed_wall_seconds = time.perf_counter() - wall_clock_started_at
+                print(
+                    f"step={step:05d} val={val_loss:.6f} "
+                    f"elapsed_wall_seconds={elapsed_wall_seconds:.3f}"
+                )
                 if val_loss < best_val_loss:
                     best_val_loss = val_loss
                     if config["checkpoint"]["save_best"]:
@@ -167,6 +177,7 @@ def main() -> None:
                                 action_stats=action_stats,
                                 data_info=dataset_info,
                                 best_val_loss=best_val_loss,
+                                elapsed_wall_seconds=elapsed_wall_seconds,
                                 scheduler=scheduler,
                                 ema=ema,
                             ),
@@ -174,6 +185,7 @@ def main() -> None:
             if step >= train["steps"]:
                 break
 
+    elapsed_wall_seconds = time.perf_counter() - wall_clock_started_at
     if config["checkpoint"]["save_last"]:
         save_checkpoint(
             last_path,
@@ -185,11 +197,13 @@ def main() -> None:
                 action_stats=action_stats,
                 data_info=dataset_info,
                 best_val_loss=best_val_loss,
+                elapsed_wall_seconds=elapsed_wall_seconds,
                 scheduler=scheduler,
                 ema=ema,
             ),
         )
     print("best_val_loss:", best_val_loss)
+    print(f"elapsed_wall_seconds: {elapsed_wall_seconds:.3f}")
     print("best checkpoint:", best_path if config["checkpoint"]["save_best"] else None)
     print("last checkpoint:", last_path if config["checkpoint"]["save_last"] else None)
 

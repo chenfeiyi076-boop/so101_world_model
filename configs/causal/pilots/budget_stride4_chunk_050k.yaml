@@ -1,0 +1,51 @@
+experiment:
+  name: budget_stride4_chunk_050k
+  seed: 42
+data:
+  mode: multi_episode
+  manifest_path: /data/x2227/so101_world_model/data/causal/armnetbench_so101_seed42_manifest.json
+temporal:
+  num_frames: 10
+  num_history: 2
+  frame_stride: 4
+action:
+  raw_action_dim: 6
+  alignment: causal
+  representation: fast_chunk
+  normalize: true
+  null_condition: zero_embedding
+model:
+  in_channels: 16
+  patch_size: 2
+  hidden_size: 384
+  depth: 12
+  num_heads: 6
+  mlp_ratio: 4.0
+  use_qk_norm: true
+flow_matching:
+  future_only_loss: true
+train:
+  batch_size: 8
+  steps: 50000
+  precision: bf16
+  lr: 1.0e-4
+  betas: [0.9, 0.99]
+  eps: 1.0e-8
+  weight_decay: 0.002
+  grad_clip: 1.0
+  scheduler:
+    type: warmup_cosine
+    warmup_ratio: 0.03
+    min_lr_ratio: 0.7
+  ema:
+    enabled: true
+    decay: 0.9995
+  val_every: 10000
+  val_windows: 256
+  num_workers: 0
+checkpoint:
+  output_dir: /data/x2227/experiments/so101_budget_pilot/050k
+  save_best: true
+  save_last: true
+latent:
+  convention: posterior_sample_times_scaling_no_shift

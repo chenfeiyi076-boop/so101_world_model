@@ -40,6 +40,7 @@ def make_checkpoint(
     action_stats: ActionStats,
     data_info: dict,
     best_val_loss: float | None,
+    elapsed_wall_seconds: float | None = None,
     scheduler=None,
     ema=None,
 ) -> dict:
@@ -51,7 +52,14 @@ def make_checkpoint(
         "config": config_with_action_stats(config, action_stats),
         "action_stats": action_stats.to_dict(),
         "data_info": copy.deepcopy(data_info),
-        "metrics": {"best_val_loss": best_val_loss},
+        "metrics": {
+            "best_val_loss": best_val_loss,
+            "elapsed_wall_seconds": (
+                None
+                if elapsed_wall_seconds is None
+                else float(elapsed_wall_seconds)
+            ),
+        },
         "git_commit": current_git_commit(),
     }
     if scheduler is not None:

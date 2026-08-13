@@ -70,12 +70,17 @@ def test_checkpoint_round_trip_preserves_resolved_config_and_stats(tmp_path):
         action_stats=stats,
         data_info={"mode": "single_episode", "train_episode_ids": [0]},
         best_val_loss=0.5,
+        elapsed_wall_seconds=12.5,
     )
     path = tmp_path / "checkpoint.pt"
     save_checkpoint(path, checkpoint)
     loaded = load_checkpoint(path)
     assert loaded["checkpoint_version"] == 2
     assert loaded["step"] == 9
+    assert loaded["metrics"] == {
+        "best_val_loss": 0.5,
+        "elapsed_wall_seconds": 12.5,
+    }
     assert loaded["config"]["temporal"]["frame_stride"] == 4
     assert loaded["config"]["action"]["raw_action_dim"] == 6
     assert loaded["config"]["action"]["effective_action_dim"] == 24
