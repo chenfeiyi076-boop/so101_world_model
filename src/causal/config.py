@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import math
 from pathlib import Path
 
 import yaml
@@ -103,6 +104,22 @@ def resolve_config(config: dict) -> dict:
     train["batch_size"] = int(train["batch_size"])
     train["steps"] = int(train["steps"])
     train["lr"] = float(train["lr"])
+    if train["steps"] <= 0:
+        raise ValueError("train.steps must be positive")
+    if not math.isfinite(train["lr"]) or train["lr"] <= 0:
+        raise ValueError("train.lr must be positive")
+    betas = train.get("betas", [0.9, 0.999])
+    if not isinstance(betas, (list, tuple)) or len(betas) != 2:
+        raise ValueError("train.betas must contain exactly two values")
+    train["betas"] = [float(beta) for beta in betas]
+    if any(
+        not math.isfinite(beta) or beta < 0.0 or beta >= 1.0
+        for beta in train["betas"]
+    ):
+        raise ValueError("each train beta must satisfy 0 <= beta < 1")
+    train["eps"] = float(train.get("eps", 1e-8))
+    if not math.isfinite(train["eps"]) or train["eps"] <= 0:
+        raise ValueError("train.eps must be positive")
     train["weight_decay"] = float(train.get("weight_decay", 0.0))
     train["grad_clip"] = float(train.get("grad_clip", 1.0))
     train["val_every"] = int(train.get("val_every", 250))
@@ -112,6 +129,33 @@ def resolve_config(config: dict) -> dict:
     if precision not in {"fp32", "bf16"}:
         raise ValueError("train.precision must be 'fp32' or 'bf16'")
     train["precision"] = precision
+
+    scheduler = train.get("scheduler", {})
+    if not isinstance(scheduler, dict):
+        raise ValueError("train.scheduler must be a mapping")
+    scheduler_type = str(scheduler.get("type", "constant"))
+    if scheduler_type not in {"constant", "warmup_cosine"}:
+        raise ValueError("train.scheduler.type must be constant or warmup_cosine")
+    warmup_ratio = float(scheduler.get("warmup_ratio", 0.0))
+    min_lr_ratio = float(scheduler.get("min_lr_ratio", 1.0))
+    if not math.isfinite(warmup_ratio) or not 0.0 <= warmup_ratio < 1.0:
+        raise ValueError("train.scheduler.warmup_ratio must satisfy 0 <= value < 1")
+    if not math.isfinite(min_lr_ratio) or not 0.0 < min_lr_ratio <= 1.0:
+        raise ValueError("train.scheduler.min_lr_ratio must satisfy 0 < value <= 1")
+    train["scheduler"] = {
+        "type": scheduler_type,
+        "warmup_ratio": warmup_ratio,
+        "min_lr_ratio": min_lr_ratio,
+    }
+
+    ema = train.get("ema", {})
+    if not isinstance(ema, dict):
+        raise ValueError("train.ema must be a mapping")
+    ema_enabled = bool(ema.get("enabled", False))
+    ema_decay = float(ema.get("decay", 0.9995))
+    if not math.isfinite(ema_decay) or not 0.0 <= ema_decay < 1.0:
+        raise ValueError("train.ema.decay must satisfy 0 <= value < 1")
+    train["ema"] = {"enabled": ema_enabled, "decay": ema_decay}
     value["experiment"]["seed"] = int(value["experiment"].get("seed", 42))
 
     if value["flow_matching"].get("future_only_loss", True) is not True:

@@ -16,9 +16,13 @@ from src.causal.checkpointing import make_checkpoint, save_checkpoint
 from src.causal.config import load_and_resolve_config
 from src.causal.datasets import build_training_datasets, data_info
 from src.causal.runtime import (
+    ExponentialMovingAverage,
     build_model,
+    build_optimizer,
+    build_scheduler,
     causal_flow_loss,
     evaluate_flow_loss,
+    validation_model,
     validate_precision_device,
 )
 
@@ -74,10 +78,12 @@ def main() -> None:
     )
 
     model = build_model(config).to(device)
-    optimizer = torch.optim.AdamW(
-        model.parameters(),
-        lr=train["lr"],
-        weight_decay=train["weight_decay"],
+    optimizer = build_optimizer(config, model)
+    scheduler = build_scheduler(config, optimizer)
+    ema = (
+        ExponentialMovingAverage(model, train["ema"]["decay"])
+        if train["ema"]["enabled"]
+        else None
     )
     output_dir = Path(config["checkpoint"]["output_dir"])
     name = config["experiment"]["name"]
@@ -92,6 +98,16 @@ def main() -> None:
     print("frame_stride:", config["temporal"]["frame_stride"])
     print("effective_action_dim:", config["action"]["effective_action_dim"])
     print("precision:", precision)
+    print("optimizer betas:", train["betas"])
+    print("optimizer eps:", train["eps"])
+    print("weight_decay:", train["weight_decay"])
+    print("scheduler:", train["scheduler"]["type"])
+    print("warmup_ratio:", train["scheduler"]["warmup_ratio"])
+    print("warmup_steps:", scheduler.warmup_steps)
+    print("min_lr_ratio:", train["scheduler"]["min_lr_ratio"])
+    print("ema_enabled:", train["ema"]["enabled"])
+    print("ema_decay:", train["ema"]["decay"])
+    print("validation_weights:", "ema" if ema is not None else "raw")
     print("action_stats source:", action_stats.source)
     print("action_mean:", action_stats.mean)
     print("action_std:", action_stats.std)
@@ -116,17 +132,21 @@ def main() -> None:
             grad_norm = torch.nn.utils.clip_grad_norm_(
                 model.parameters(), train["grad_clip"]
             )
+            update_lr = scheduler.get_last_lr()[0]
             optimizer.step()
+            if ema is not None:
+                ema.update(model)
+            scheduler.step()
             step += 1
             if step == 1 or step % 25 == 0:
                 print(
                     f"step={step:05d} train={loss.detach().item():.6f} "
-                    f"grad={grad_norm.detach().item():.4f}"
+                    f"grad={grad_norm.detach().item():.4f} lr={update_lr:.8e}"
                 )
 
             if step % train["val_every"] == 0 or step == train["steps"]:
                 val_loss = evaluate_flow_loss(
-                    model,
+                    validation_model(model, ema),
                     val_loader,
                     device=device,
                     num_history=num_history,
@@ -147,6 +167,8 @@ def main() -> None:
                                 action_stats=action_stats,
                                 data_info=dataset_info,
                                 best_val_loss=best_val_loss,
+                                scheduler=scheduler,
+                                ema=ema,
                             ),
                         )
             if step >= train["steps"]:
@@ -163,6 +185,8 @@ def main() -> None:
                 action_stats=action_stats,
                 data_info=dataset_info,
                 best_val_loss=best_val_loss,
+                scheduler=scheduler,
+                ema=ema,
             ),
         )
     print("best_val_loss:", best_val_loss)

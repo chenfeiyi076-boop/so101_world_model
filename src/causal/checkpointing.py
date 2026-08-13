@@ -40,8 +40,10 @@ def make_checkpoint(
     action_stats: ActionStats,
     data_info: dict,
     best_val_loss: float | None,
+    scheduler=None,
+    ema=None,
 ) -> dict:
-    return {
+    checkpoint = {
         "checkpoint_version": CHECKPOINT_VERSION,
         "step": int(step),
         "model_state_dict": model.state_dict(),
@@ -52,6 +54,11 @@ def make_checkpoint(
         "metrics": {"best_val_loss": best_val_loss},
         "git_commit": current_git_commit(),
     }
+    if scheduler is not None:
+        checkpoint["scheduler_state_dict"] = scheduler.state_dict()
+    if ema is not None:
+        checkpoint["ema_model_state_dict"] = ema.state_dict()
+    return checkpoint
 
 
 def save_checkpoint(path: str | Path, checkpoint: dict) -> None:

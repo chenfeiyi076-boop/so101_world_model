@@ -28,6 +28,20 @@ def evaluation_precision(config: dict) -> str:
     return config["train"].get("precision", "fp32")
 
 
+def select_evaluation_state_dict(
+    checkpoint: dict,
+    weights: str,
+) -> tuple[dict, str]:
+    if weights not in {"auto", "ema", "raw"}:
+        raise ValueError("weights must be auto, ema, or raw")
+    has_ema = "ema_model_state_dict" in checkpoint
+    if weights == "ema" and not has_ema:
+        raise RuntimeError("--weights ema requested but checkpoint has no EMA weights")
+    if weights == "ema" or (weights == "auto" and has_ema):
+        return checkpoint["ema_model_state_dict"], "ema"
+    return checkpoint["model_state_dict"], "raw"
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Evaluate a causal checkpoint")
     parser.add_argument("--checkpoint", required=True)
@@ -37,6 +51,7 @@ def main() -> None:
     parser.add_argument("--noise-draws", type=int, default=4)
     parser.add_argument("--batch-size", type=int, default=1)
     parser.add_argument("--device", default="cuda", choices=("cuda", "cpu"))
+    parser.add_argument("--weights", default="auto", choices=("auto", "ema", "raw"))
     args = parser.parse_args()
 
     checkpoint = load_checkpoint(args.checkpoint)
@@ -64,7 +79,10 @@ def main() -> None:
     loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=False)
 
     model = build_model(config).to(device)
-    model.load_state_dict(checkpoint["model_state_dict"])
+    state_dict, selected_weights = select_evaluation_state_dict(
+        checkpoint, args.weights
+    )
+    model.load_state_dict(state_dict)
     values = []
     for draw in range(args.noise_draws):
         values.append(
@@ -83,6 +101,7 @@ def main() -> None:
     print("representation:", config["action"]["representation"])
     print("effective_action_dim:", config["action"]["effective_action_dim"])
     print("precision:", precision)
+    print("weights:", selected_weights)
     print("action_mean (checkpoint):", checkpoint["action_stats"]["mean"])
     print("action_std (checkpoint):", checkpoint["action_stats"]["std"])
     print("mean FM loss:", sum(values) / len(values))
