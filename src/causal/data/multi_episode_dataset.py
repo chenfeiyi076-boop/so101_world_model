@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Mapping
 
 import torch
 from torch.utils.data import Dataset
@@ -18,13 +19,91 @@ from .common import (
 )
 
 
+def _manifest_episode_id(value: object, context: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise RuntimeError(f"{context} must be an integer episode ID")
+    return int(value)
+
+
+def validate_causal_manifest(manifest: dict) -> dict:
+    """Validate generic train/val/test episode-manifest consistency."""
+
+    if not isinstance(manifest, dict):
+        raise RuntimeError("manifest must be a JSON object")
+    required = (
+        "train_episode_ids",
+        "val_episode_ids",
+        "test_episode_ids",
+        "episodes",
+    )
+    for key in required:
+        if key not in manifest:
+            raise RuntimeError(f"manifest is missing {key!r}")
+
+    entries = manifest["episodes"]
+    if not isinstance(entries, list) or not entries:
+        raise RuntimeError("manifest episodes must be a non-empty list")
+    episode_ids = []
+    for position, entry in enumerate(entries):
+        if not isinstance(entry, Mapping):
+            raise RuntimeError(f"episodes[{position}] must be an object")
+        for key in ("episode_index", "cache_file"):
+            if key not in entry:
+                raise RuntimeError(f"episodes[{position}] is missing {key!r}")
+        episode_id = _manifest_episode_id(
+            entry["episode_index"], f"episodes[{position}].episode_index"
+        )
+        cache_file = entry["cache_file"]
+        if not isinstance(cache_file, str) or not cache_file:
+            raise RuntimeError(
+                f"episodes[{position}].cache_file must be a non-empty string"
+            )
+        episode_ids.append(episode_id)
+    if len(set(episode_ids)) != len(episode_ids):
+        raise RuntimeError("manifest contains duplicate episode entries")
+    episode_id_set = set(episode_ids)
+
+    split_sets: dict[str, set[int]] = {}
+    for split in ("train", "val", "test"):
+        key = f"{split}_episode_ids"
+        values = manifest[key]
+        if not isinstance(values, list) or not values:
+            raise RuntimeError(f"manifest split {split!r} must be a non-empty list")
+        ids = [
+            _manifest_episode_id(value, f"{key}[{position}]")
+            for position, value in enumerate(values)
+        ]
+        if len(set(ids)) != len(ids):
+            raise RuntimeError(f"manifest split {split!r} contains duplicate IDs")
+        unknown = set(ids) - episode_id_set
+        if unknown:
+            raise RuntimeError(
+                f"manifest split {split!r} references unknown episodes: "
+                f"{sorted(unknown)}"
+            )
+        split_sets[split] = set(ids)
+
+    for left, right in (("train", "val"), ("train", "test"), ("val", "test")):
+        overlap = split_sets[left] & split_sets[right]
+        if overlap:
+            raise RuntimeError(
+                f"manifest splits {left!r}/{right!r} overlap: {sorted(overlap)}"
+            )
+    split_union = set().union(*split_sets.values())
+    if split_union != episode_id_set:
+        missing = episode_id_set - split_union
+        extra = split_union - episode_id_set
+        raise RuntimeError(
+            "manifest split union does not equal episode entries: "
+            f"missing={sorted(missing)}, extra={sorted(extra)}"
+        )
+    return manifest
+
+
 def load_causal_manifest(path: str | Path) -> dict:
     with Path(path).open("r", encoding="utf-8") as handle:
         manifest = json.load(handle)
-    for key in ("train_episode_ids", "val_episode_ids", "episodes"):
-        if key not in manifest:
-            raise RuntimeError(f"manifest is missing {key!r}")
-    return manifest
+    return validate_causal_manifest(manifest)
 
 
 def episode_ids_for_split(manifest: dict, split: str) -> list[int]:

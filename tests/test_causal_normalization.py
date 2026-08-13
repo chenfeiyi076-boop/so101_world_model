@@ -63,14 +63,18 @@ def _base_config(data: dict, representation="fast_chunk"):
 def test_multi_stats_use_only_train_episode_ids(tmp_path):
     train_path = tmp_path / "train.pt"
     val_path = tmp_path / "val.pt"
+    test_path = tmp_path / "test.pt"
     _cache(train_path, 0, torch.arange(60).reshape(10, 6))
     _cache(val_path, 1, torch.full((10, 6), 1_000_000.0))
+    _cache(test_path, 2, torch.full((10, 6), -1_000_000.0))
     manifest = {
         "train_episode_ids": [0],
         "val_episode_ids": [1],
+        "test_episode_ids": [2],
         "episodes": [
             {"episode_index": 0, "cache_file": str(train_path)},
             {"episode_index": 1, "cache_file": str(val_path)},
+            {"episode_index": 2, "cache_file": str(test_path)},
         ],
     }
     manifest_path = tmp_path / "manifest.json"
@@ -84,17 +88,21 @@ def test_multi_stats_use_only_train_episode_ids(tmp_path):
 def test_train_and_val_share_exact_same_stats_object(tmp_path):
     train_path = tmp_path / "train.pt"
     val_path = tmp_path / "val.pt"
+    test_path = tmp_path / "test.pt"
     _cache(train_path, 0, torch.arange(72).reshape(12, 6))
     _cache(val_path, 1, torch.arange(72, 144).reshape(12, 6))
+    _cache(test_path, 2, torch.arange(144, 216).reshape(12, 6))
     manifest_path = tmp_path / "manifest.json"
     manifest_path.write_text(
         json.dumps(
             {
                 "train_episode_ids": [0],
                 "val_episode_ids": [1],
+                "test_episode_ids": [2],
                 "episodes": [
                     {"episode_index": 0, "cache_file": str(train_path)},
                     {"episode_index": 1, "cache_file": str(val_path)},
+                    {"episode_index": 2, "cache_file": str(test_path)},
                 ],
             }
         ),

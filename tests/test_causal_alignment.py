@@ -116,13 +116,19 @@ def _write_cache(path, episode_id: int, length: int, offset: float = 0.0):
 
 def test_multi_episode_windows_never_cross_episode(tmp_path):
     paths = []
-    for episode_id, offset in ((0, 0.0), (1, 1000.0)):
+    for episode_id, offset in (
+        (0, 0.0),
+        (1, 1000.0),
+        (2, 2000.0),
+        (3, 3000.0),
+    ):
         path = tmp_path / f"episode_{episode_id:03d}.pt"
         _write_cache(path, episode_id, 12, offset)
         paths.append(path)
     manifest = {
         "train_episode_ids": [0, 1],
-        "val_episode_ids": [1],
+        "val_episode_ids": [2],
+        "test_episode_ids": [3],
         "episodes": [
             {"episode_index": i, "cache_file": str(path)}
             for i, path in enumerate(paths)
