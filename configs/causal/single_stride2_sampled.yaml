@@ -1,0 +1,45 @@
+experiment:
+  name: causal_single_ep0_stride2_shifted_sampled
+  seed: 42
+data:
+  mode: single_episode
+  cache_root: data/latent_cache/so101_front
+  episode_id: 0
+  split_ranges:
+    train: [0, 400]
+    val: [400, 510]
+temporal:
+  num_frames: 10
+  num_history: 2
+  frame_stride: 2
+action:
+  raw_action_dim: 6
+  alignment: causal
+  representation: shifted_sampled
+  normalize: true
+  null_condition: zero_embedding
+model:
+  in_channels: 16
+  patch_size: 2
+  hidden_size: 384
+  depth: 12
+  num_heads: 6
+  mlp_ratio: 4.0
+  use_qk_norm: true
+flow_matching:
+  future_only_loss: true
+train:
+  batch_size: 1
+  steps: 500
+  lr: 1.0e-4
+  weight_decay: 0.0
+  grad_clip: 1.0
+  val_every: 100
+  val_windows: 64
+  num_workers: 0
+checkpoint:
+  output_dir: checkpoints/causal
+  save_best: true
+  save_last: true
+latent:
+  convention: posterior_sample_times_scaling_no_shift

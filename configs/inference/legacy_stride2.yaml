@@ -1,0 +1,20 @@
+model:
+  in_channels: 16
+  patch_size: 2
+  hidden_size: 384
+  depth: 12
+  num_heads: 6
+  action_dim: 6
+  mlp_ratio: 4.0
+  use_qk_norm: true
+temporal:
+  num_frames: 10
+  num_history: 2
+  frame_stride: 2
+action:
+  alignment: synchronized_legacy
+  representation: sampled
+  control_representation: absolute
+  raw_dim: 6
+latent:
+  convention: posterior_sample_times_scaling_no_shift

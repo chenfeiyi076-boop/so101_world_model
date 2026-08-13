@@ -1,0 +1,41 @@
+experiment:
+  name: causal_multi_stride4_fast_chunk
+  seed: 42
+data:
+  mode: multi_episode
+  manifest_path: data/latent_cache/so101_front/multi_episode_manifest.json
+temporal:
+  num_frames: 10
+  num_history: 2
+  frame_stride: 4
+action:
+  raw_action_dim: 6
+  alignment: causal
+  representation: fast_chunk
+  normalize: true
+  null_condition: zero_embedding
+model:
+  in_channels: 16
+  patch_size: 2
+  hidden_size: 384
+  depth: 12
+  num_heads: 6
+  mlp_ratio: 4.0
+  use_qk_norm: true
+flow_matching:
+  future_only_loss: true
+train:
+  batch_size: 1
+  steps: 4000
+  lr: 1.0e-4
+  weight_decay: 0.0
+  grad_clip: 1.0
+  val_every: 250
+  val_windows: 128
+  num_workers: 0
+checkpoint:
+  output_dir: checkpoints/causal
+  save_best: true
+  save_last: true
+latent:
+  convention: posterior_sample_times_scaling_no_shift
