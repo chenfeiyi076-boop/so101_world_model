@@ -25,3 +25,30 @@ Normalization has one source of truth:
 - evaluation loads them from the checkpoint and never recomputes them;
 - `fast_chunk` normalizes each raw 6D action with that same mean/std before
   flattening to 12D or 24D.
+
+## Autoregressive latent rollout evaluation
+
+`evaluate_causal.py` reports noised-ground-truth Flow Matching objective loss
+on fixed val/test windows. In contrast, `evaluate_rollout.py` starts each
+future latent from pure Gaussian noise and integrates the existing Flow
+Matching Euler sampler from tau 1 to 0. Only the initial history latents are
+ground truth; every generated future is fed back as context for the next
+prediction. Future ground-truth latents are read only after generation for
+post-hoc latent-error metrics.
+
+When a rollout grows beyond the training window, the evaluator keeps the most
+recent `num_frames - 1` clean context latents and appends one Gaussian target,
+so the temporal input never exceeds the checkpoint's trained `num_frames`.
+Actions remain the real causal action chunks from the selected val/test
+trajectory, and the first slot of every sliding window is explicit NULL.
+
+```bash
+python scripts/evaluate_rollout.py \
+  --checkpoint /path/to/causal_checkpoint.pt \
+  --split test \
+  --rollout-steps 32 \
+  --output-dir /path/to/rollout_eval
+```
+
+The reported MSE, RMSE, MAE, relative L2, and cosine similarity are latent-space
+prediction errors. They are not pixel-space or perceptual image-quality metrics.
