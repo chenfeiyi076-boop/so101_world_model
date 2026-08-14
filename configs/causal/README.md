@@ -42,6 +42,16 @@ so the temporal input never exceeds the checkpoint's trained `num_frames`.
 Actions remain the real causal action chunks from the selected val/test
 trajectory, and the first slot of every sliding window is explicit NULL.
 
+`--batch-size` controls how many independent `(rollout case, noise draw)`
+streams advance through the same future step together on the GPU. For example,
+`--batch-size 8` advances eight independent streams in parallel; time steps
+within each individual autoregressive rollout remain strictly sequential.
+
+With `--threshold-metric mse_p90`, the supported-horizon threshold is applied
+to the 90th percentile of per-rollout latent MSE at each autoregressive step.
+As with the mean-error thresholds, the first crossing ends the supported
+continuous prefix even if a later step falls below the threshold again.
+
 ```bash
 python scripts/evaluate_rollout.py \
   --checkpoint /path/to/causal_checkpoint.pt \

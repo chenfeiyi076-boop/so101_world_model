@@ -20,8 +20,9 @@ from scripts.evaluate_causal import (
 from src.causal.checkpointing import action_stats_from_checkpoint, load_checkpoint
 from src.causal.data.common import load_episode_cache
 from src.causal.rollout import (
+    RolloutStream,
     aggregate_rollout_metrics,
-    autoregressive_causal_rollout,
+    autoregressive_causal_rollout_batch,
     build_rollout_catalog,
     rollout_metric_rows,
     select_rollout_cases,
@@ -76,7 +77,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--weights", default="auto", choices=("auto", "ema", "raw"))
     parser.add_argument("--error-threshold", type=float)
     parser.add_argument(
-        "--threshold-metric", default="mse", choices=("mse", "relative_l2")
+        "--threshold-metric",
+        default="mse",
+        choices=("mse", "mse_p90", "relative_l2"),
     )
     parser.add_argument("--save-latents", action="store_true")
     parser.add_argument("--max-saved-rollouts", type=int, default=4)
@@ -146,8 +149,8 @@ def main() -> None:
         raise ValueError("rollout/euler steps must be positive")
     if args.noise_draws <= 0:
         raise ValueError("noise-draws must be positive")
-    if args.batch_size != 1:
-        raise ValueError("the correctness-first rollout evaluator currently requires --batch-size 1")
+    if args.batch_size <= 0:
+        raise ValueError("batch-size must be positive")
     if args.max_saved_rollouts < 0:
         raise ValueError("max-saved-rollouts must be non-negative")
 
@@ -183,34 +186,47 @@ def main() -> None:
     args.output_dir.mkdir(parents=True, exist_ok=True)
     metric_rows = []
     saved = 0
-    current_episode_id = None
-    episode = None
-    for case_index, case in enumerate(cases):
-        if case.episode_id != current_episode_id:
-            episode = load_episode_cache(case.cache_path, action["raw_action_dim"])
-            current_episode_id = case.episode_id
-        for noise_draw in range(args.noise_draws):
-            result = autoregressive_causal_rollout(
-                model=model,
-                config=config,
-                action_stats=action_stats,
-                episode=episode,
-                episode_id=case.episode_id,
-                start=case.start,
-                rollout_steps=args.rollout_steps,
-                euler_steps=args.euler_steps,
-                seed=args.seed,
-                noise_draw=noise_draw,
-                device=device,
-                precision=precision,
+    episode_cache = {}
+    streams = []
+    for case in cases:
+        if case.episode_id not in episode_cache:
+            episode_cache[case.episode_id] = load_episode_cache(
+                case.cache_path, action["raw_action_dim"]
             )
+        for noise_draw in range(args.noise_draws):
+            streams.append(
+                RolloutStream(
+                    episode=episode_cache[case.episode_id],
+                    episode_id=case.episode_id,
+                    start=case.start,
+                    noise_draw=noise_draw,
+                )
+            )
+
+    number_of_batches = (len(streams) + args.batch_size - 1) // args.batch_size
+    for batch_index, offset in enumerate(
+        range(0, len(streams), args.batch_size), start=1
+    ):
+        batch_streams = streams[offset : offset + args.batch_size]
+        results = autoregressive_causal_rollout_batch(
+            model=model,
+            config=config,
+            action_stats=action_stats,
+            streams=batch_streams,
+            rollout_steps=args.rollout_steps,
+            euler_steps=args.euler_steps,
+            seed=args.seed,
+            device=device,
+            precision=precision,
+        )
+        for result in results:
             metric_rows.extend(rollout_metric_rows(result))
             if args.save_latents and saved < args.max_saved_rollouts:
                 _save_debug_rollout(args.output_dir, result, saved)
                 saved += 1
         print(
-            f"completed rollout case {case_index + 1}/{len(cases)}: "
-            f"episode={case.episode_id} start={case.start}",
+            f"completed rollout batch {batch_index}/{number_of_batches}: "
+            f"{len(batch_streams)} streams",
             flush=True,
         )
 
@@ -239,6 +255,9 @@ def main() -> None:
         "rollout_steps": args.rollout_steps,
         "euler_steps": args.euler_steps,
         "noise_draws": args.noise_draws,
+        "batch_size": args.batch_size,
+        "number_of_batches": number_of_batches,
+        "max_effective_batch_size": min(args.batch_size, len(streams)),
         "seed": args.seed,
         "number_of_rollout_cases": len(cases),
         "number_of_total_stochastic_rollouts": len(cases) * args.noise_draws,
