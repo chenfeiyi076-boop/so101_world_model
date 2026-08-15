@@ -62,3 +62,38 @@ python scripts/evaluate_rollout.py \
 
 The reported MSE, RMSE, MAE, relative L2, and cosine similarity are latent-space
 prediction errors. They are not pixel-space or perceptual image-quality metrics.
+
+## Autoregressive rollout visualization
+
+`visualize_rollout.py` reads an existing rollout evaluation directory and
+deterministically reruns only the selected stochastic streams; it does not
+rerun the full evaluation or require saved latents. By default it selects
+representative q10, q50, and q90 streams by mean per-step rollout MSE. Explicit
+`--stream EPISODE_ID:START:NOISE_DRAW` arguments can be used instead.
+
+The prediction shown is the predicted latent decoded through the frozen VAE.
+The reference labelled **GT latent reconstruction** is the ground-truth cached
+latent decoded through that same VAE. It is not the original RGB ground truth.
+Both paths use the cache convention
+
+```text
+z_decode = z_cache / scaling_factor
+```
+
+and never apply the VAE config's `shift_factor`. Contact-sheet time labels are
+future offsets relative to the last ground-truth history frame.
+
+```bash
+CUDA_VISIBLE_DEVICES=0 python scripts/visualize_rollout.py \
+  --rollout-eval-dir /path/to/rollout_eval \
+  --vae-path /path/to/sd3-repository-or-vae \
+  --output-dir /path/to/rollout_visualization \
+  --selection-metric mean_mse \
+  --quantiles 0.1 0.5 0.9 \
+  --display-steps 1 4 8 16 32 \
+  --decode-batch-size 8 \
+  --device cuda
+```
+
+`--vae-path` accepts either a complete local Diffusers repository containing
+`vae/config.json` or the VAE directory itself. Model loading is local-only.
