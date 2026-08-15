@@ -133,3 +133,42 @@ CUDA_VISIBLE_DEVICES=0 python scripts/evaluate_action_controllability.py \
   --bootstrap-seed 4242 \
   --device cuda
 ```
+
+## Action controllability visualization
+
+`visualize_action_controllability.py` reads a completed action-controllability
+result directory and reruns only a few representative paired streams. Automatic
+q10/q50/q90 selection is performed over physical `(episode_id, start)` cases
+using case-level `mean_delta_mse`, not over individual diffusion-noise draws.
+For each selected case, the displayed noise draw is the rollout whose
+`mean_delta_mse` is closest to the case mean (ties use the smallest draw ID).
+This deterministic rule avoids manual cherry-picking.
+
+The four contact-sheet rows have distinct meanings:
+
+- **Original RGB** is the real frame from the SO101 front-camera video, using
+  the cache's exact episode/frame alignment and the same shortest-side resize
+  plus 256x256 center crop used during VAE caching.
+- **GT latent reconstruction** is the factual cached latent decoded by the
+  frozen VAE. It is not original RGB.
+- **True Action Prediction** is the correct causal-action rollout latent decoded
+  by that VAE.
+- **Shuffled Action Prediction** is the temporal chunk-derangement rollout
+  latent decoded by that VAE.
+
+The visualization restores checkpoint, EMA/raw weight choice, rollout seed,
+shuffle seed, Euler steps, and protocol from the source summary. It verifies the
+regenerated shuffle permutation against the formal audit and gives TRUE and
+shuffled branches identical Gaussian noise. VAE decoding remains
+`z_vae = z_cache / scaling_factor` with no `shift_factor`.
+
+```bash
+CUDA_VISIBLE_DEVICES=0 python scripts/visualize_action_controllability.py \
+  --action-eval-dir /path/to/300k_val_R32_N128_D4_true_vs_shuffle \
+  --vae-path /path/to/sd3 \
+  --output-dir /path/to/action_visualization \
+  --quantiles 0.1 0.5 0.9 \
+  --display-steps 1 4 8 16 24 32 \
+  --decode-batch-size 8 \
+  --device cuda
+```
