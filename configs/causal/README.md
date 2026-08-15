@@ -97,3 +97,39 @@ CUDA_VISIBLE_DEVICES=0 python scripts/visualize_rollout.py \
 
 `--vae-path` accepts either a complete local Diffusers repository containing
 `vae/config.json` or the VAE directory itself. Model loading is local-only.
+
+## Action controllability / action-shuffling negative control
+
+`evaluate_action_controllability.py` reuses the checkpoint, cases, noise draws,
+seed, Euler steps, and rollout horizon recorded by an existing rollout
+evaluation. For each stochastic stream it runs a factual-action branch and a
+temporally shuffled-action branch with exactly the same initial Gaussian noise.
+Only future `[frame_stride, raw_action_dim]` chunks are permuted; the observed
+history transition and the order within every chunk remain unchanged. The
+permutation is a deterministic case-level derangement shared by all noise draws
+for that `(episode_id, start)` case.
+
+The shuffled branch has no counterfactual ground truth. Comparing its prediction
+with the factual future therefore measures factual-consistency degradation under
+an action-corruption negative control, not counterfactual prediction accuracy.
+Prediction divergence between the two branches measures action sensitivity, but
+does not by itself establish causal correctness. Confidence intervals resample
+physical `(episode_id, start)` cases after averaging their noise draws; stochastic
+draws are not treated as independent physical cases.
+
+The summary separates TRUE-branch rerun tolerance diagnostics:
+`true_rerun_metric_warning_count` counts individual metric comparisons above
+tolerance, while `true_rerun_streams_with_warning` counts stochastic streams
+with at least one such comparison. Identity and target-frame mismatches remain
+hard failures.
+
+```bash
+CUDA_VISIBLE_DEVICES=0 python scripts/evaluate_action_controllability.py \
+  --source-rollout-eval-dir /path/to/300k_val_R32_N128_D4 \
+  --output-dir /path/to/300k_val_action_shuffle \
+  --shuffle-seed 30360 \
+  --pair-batch-size 4 \
+  --bootstrap-samples 10000 \
+  --bootstrap-seed 4242 \
+  --device cuda
+```
