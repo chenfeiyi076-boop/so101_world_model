@@ -135,3 +135,100 @@ Before the full run, inspect `per_draw_step.csv`, `per_episode_step.csv`,
 aligned Original RGB / GT latent reconstruction / predicted RGB example using
 the existing visualization tooling. Confirm that all three refer to the same
 physical frame.
+
+## Independent SO101 state-dynamics MLP
+
+The state-dynamics pipeline is separate from the visual causal world model. It
+does not read video, VAE latents, or causal cache data and does not import the
+causal Dataset. At raw 20 Hz, one sample maps current robot state and four
+consecutive actions to four absolute future states:
+
+```text
+state[t] [6] + action[t:t+4] [4,6]
+    -> MLP(30 -> 256 -> 256 -> 256 -> 24, SiLU)
+    -> state[t+1:t+5] [4,6]
+```
+
+Windows are built only after an episode-level, task-stratified split. An episode
+of length `L` contributes exactly `L - 4` stride-one windows and no window can
+cross an episode boundary. The independent seed-42 split uses floor-80%,
+floor-10%, and remainder per task; the formal 2,499-episode release must resolve
+to 1,999 train, 248 validation, and 252 test episodes. State and action z-score
+statistics are computed from train episodes only and stored in each checkpoint.
+
+The formal recipe is FP32 single-GPU AdamW (`lr=1e-3`, `weight_decay=1e-4`,
+batch 4096, up to 50 epochs, early-stopping patience 8). Every epoch evaluates
+the complete teacher-forced validation set. `best.pt` is selected by validation
+normalized absolute-state MSE and `last.pt` is always updated. Training and its
+smoke mode read only train/validation parquet rows; test episode IDs may be
+reported from the manifest, but test numerical data is loaded only by the
+evaluation entry point.
+
+First inspect the real release and build the independent split. The inspect
+output reports the parquet schema, episode/task counts, action/state shapes,
+frame-index range, and timestamp diagnostics without opening video:
+
+```bash
+python scripts/build_so101_state_split.py \
+  --dataset-root /data/x2227/datasets/armnetbench_v01_lerobot_so101 \
+  --inspect-only
+
+python scripts/build_so101_state_split.py \
+  --dataset-root /data/x2227/datasets/armnetbench_v01_lerobot_so101 \
+  --output data/state_dynamics/so101_state_seed42_split.json \
+  --seed 42 \
+  --causal-manifest /data/x2227/so101_world_model/data/causal/armnetbench_so101_seed42_manifest.json
+```
+
+For the formal experiment, `--causal-manifest` is mandatory operationally: do
+not start training until this command prints
+`causal manifest compatibility: PASS`. The state pipeline remains independently
+implemented; this check proves exact train/val/test episode-ID compatibility
+with the frozen visual-world-model experiment.
+
+Run a bounded real-data forward/backward check before formal training. It reads
+at most four episodes from each split and writes no checkpoint:
+
+```bash
+CUDA_VISIBLE_DEVICES=0 python scripts/train_so101_state_mlp.py \
+  --config configs/state_dynamics/so101_mlp.yaml \
+  --dataset-root /data/x2227/datasets/armnetbench_v01_lerobot_so101 \
+  --split-manifest data/state_dynamics/so101_state_seed42_split.json \
+  --output-dir /data/x2227/experiments/so101_state_mlp/smoke \
+  --smoke-test --max-episodes 4
+```
+
+Formal training remains a single-GPU job:
+
+```bash
+CUDA_VISIBLE_DEVICES=0 PYTHONUNBUFFERED=1 \
+python scripts/train_so101_state_mlp.py \
+  --config configs/state_dynamics/so101_mlp.yaml \
+  --dataset-root /data/x2227/datasets/armnetbench_v01_lerobot_so101 \
+  --split-manifest data/state_dynamics/so101_state_seed42_split.json \
+  --output-dir /data/x2227/experiments/so101_state_mlp/mlp256_abs
+```
+
+Evaluation reports teacher-forced raw-state MAE/RMSE overall, by 20 Hz horizon,
+and by joint. It also performs a 5 Hz autoregressive rollout: only the first GT
+state is used, each predicted `t+4` endpoint feeds the next step, and future GT
+states are used only after rollout for metrics. GT actions remain inputs. A
+command-copy baseline compares `action[t+3]` directly with `state[t+4]`.
+
+```bash
+CUDA_VISIBLE_DEVICES=0 python scripts/evaluate_so101_state_mlp.py \
+  --checkpoint /data/x2227/experiments/so101_state_mlp/mlp256_abs/best.pt \
+  --dataset-root /data/x2227/datasets/armnetbench_v01_lerobot_so101 \
+  --split test \
+  --output-dir /data/x2227/experiments/so101_state_mlp/mlp256_abs/test
+```
+
+Outputs include `teacher_forced_summary.json`, per-horizon/per-joint CSVs,
+`autoregressive_summary.json`, `autoregressive_per_episode.csv`, the existing
+available-case per-step/per-joint/time CSVs, and
+`autoregressive_error_vs_time.png`. The summary labels metrics explicitly as
+endpoint-micro or episode-macro; legacy endpoint metric names remain aliases.
+Endpoint-micro metrics pool all available endpoint/joint errors, so longer
+episodes contribute more endpoints. Per-episode means first average that
+episode's available rollout steps, and episode-macro metrics then weight every
+physical episode equally.

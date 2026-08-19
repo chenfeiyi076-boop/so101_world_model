@@ -1,0 +1,23 @@
+experiment:
+  name: so101_state_mlp256_absolute
+  seed: 42
+
+data:
+  state_dim: 6
+  action_dim: 6
+  prediction_horizon: 4
+  window_stride: 1
+
+model:
+  hidden_dim: 256
+  num_hidden_layers: 3
+
+train:
+  epochs: 50
+  batch_size: 4096
+  num_workers: 4
+  lr: 1.0e-3
+  weight_decay: 1.0e-4
+  precision: fp32
+  early_stopping_patience: 8
+  device: auto
